@@ -84,4 +84,6 @@ wrapt==1.17.3
 xyzservices==2025.11.0
 yarl==1.22.0
 uvicorn
+fastapi
+
 
