@@ -1,3 +1,5 @@
+# © 2025 Abishek Xavier A — All rights reserved
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from analysis.pipeline import run_exoplanet_pipeline
