@@ -7,6 +7,7 @@ from analysis.metrics import (
     compute_snr,
     secondary_eclipse_depth,
     vet_transit_shape,
+    compute_stellar_scatter,
 )
 
 # ----------------------------
@@ -90,7 +91,7 @@ def classify_from_confidence(conf):
     else:
         return "High-Confidence Planet Candidate 🪐🟢"
 
-def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit_points, period, fit_ratio, is_v_shape):
+def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit_points, period, fit_ratio, is_v_shape, stellar_scatter):
     # 🚨 Only true hard gate
     if snr < 3:
         return 5.0
@@ -111,11 +112,21 @@ def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit
     elif period < 3.0:
         score -= 15.0
 
-    # 2) Depth realism
+    # 2) Depth realism & scatter vetting
     if depth < 0.02:
         score += 15.0
     elif depth < 0.05:
         score += 8.0
+
+    # Stellar scatter check (depth compared to local baseline noise)
+    if stellar_scatter > 0:
+        depth_to_scatter = depth / stellar_scatter
+        if depth_to_scatter < 1.5:
+            score -= 30.0
+        elif depth_to_scatter < 2.0:
+            score -= 15.0
+        else:
+            score += 10.0
 
     # 3) Odd–even consistency
     if abs(odd_depth - even_depth) < 0.002:
@@ -192,6 +203,9 @@ def run_exoplanet_pipeline(tic_id: int):
     phase = folded.phase.value
     transit_points = int(np.sum((phase > -0.05) & (phase < 0.05)))
 
+    # 5.7️⃣ Compute stellar scatter baseline noise
+    stellar_scatter = compute_stellar_scatter(folded)
+
     # 6️⃣ Confidence score (FIRST)
     conf = confidence_score(
         depth=depth,
@@ -202,7 +216,8 @@ def run_exoplanet_pipeline(tic_id: int):
         transit_points=transit_points,
         period=period,
         fit_ratio=fit_ratio,
-        is_v_shape=is_v_shape
+        is_v_shape=is_v_shape,
+        stellar_scatter=stellar_scatter
     )
 
     # 7️⃣ Status derived from confidence (SECOND)
@@ -233,6 +248,7 @@ def run_exoplanet_pipeline(tic_id: int):
     "planet_radius": float(planet_radius),
     "fit_ratio": float(fit_ratio),
     "is_v_shape": bool(is_v_shape),
+    "stellar_scatter": float(stellar_scatter),
 
     # Raw light curve
     "time": lc_clean.time.value.tolist(),

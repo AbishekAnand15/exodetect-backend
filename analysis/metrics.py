@@ -181,3 +181,15 @@ def vet_transit_shape(folded_lc, depth_est, duration_phase, period):
     
     return fit_ratio, is_v_shape
 
+def compute_stellar_scatter(folded_lc, phase_width=0.04):
+    """
+    Measure out-of-transit stellar variability (noise floor scatter) using MAD.
+    """
+    phase = folded_lc.phase.value
+    flux = folded_lc.flux.value
+    oot = np.abs(phase) > phase_width
+    if np.sum(oot) < 10:
+        return 0.005
+    mad = np.median(np.abs(flux[oot] - np.median(flux[oot])))
+    return float(1.4826 * mad)
+
