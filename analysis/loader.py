@@ -14,8 +14,8 @@ def load_tess_lightcurve(tic_id: str):
     # Get the table representing the first search result
     table = search.table[:1]
     
-    # Compute the local cache path
-    download_dir = search._default_download_dir()
+    # Compute the local cache path (use /tmp on Vercel/Linux, or default directory on Windows)
+    download_dir = "/tmp" if os.name != 'nt' else search._default_download_dir()
     path = os.path.join(
         download_dir.rstrip("/"),
         "mastDownload",

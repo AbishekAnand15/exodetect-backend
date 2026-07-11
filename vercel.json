@@ -10,5 +10,8 @@
       "src": "/(.*)",
       "dest": "main.py"
     }
-  ]
+  ],
+  "env": {
+    "ASTROPY_CACHE_DIR": "/tmp"
+  }
 }
