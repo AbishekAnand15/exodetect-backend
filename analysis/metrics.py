@@ -100,3 +100,84 @@ def secondary_eclipse_depth(folded_lc):
     if len(secondary) == 0:
         return 0.0
     return 1 - np.median(secondary)
+
+
+import scipy.optimize as opt
+
+def vet_transit_shape(folded_lc, depth_est, duration_phase, period):
+    """
+    Fit trapezoid (U-shape) and triangle (V-shape) models to the folded transit.
+    Returns:
+        fit_ratio: float, ratio of trapezoid SSR to triangle SSR (lower = U-shaped)
+        is_v_shape: bool, True if the transit shape is V-shaped (likely eclipsing binary)
+    """
+    # Normalize phase to dimensionless units (-0.5 to 0.5) by dividing by period
+    phase = folded_lc.phase.value / period
+    flux = folded_lc.flux.value
+    
+    # We focus on the transit window (phase within ± 0.05, representing 10% of orbit)
+    mask = np.abs(phase) < 0.05
+    x = phase[mask]
+    y = flux[mask]
+    
+    if len(x) < 15:
+        return 1.0, False  # Not enough points to fit
+        
+    # Model 1: Trapezoid (U-Shape)
+    def trapezoid(t, depth, duration, ingress, t0):
+        y_fit = np.ones_like(t)
+        abs_t = np.abs(t - t0)
+        ing = max(ingress, 1e-5)
+        t_start_slope = duration / 2.0 + ing / 2.0
+        t_end_slope = duration / 2.0 - ing / 2.0
+        
+        mask_out = (abs_t >= t_start_slope)
+        mask_bottom = (abs_t <= t_end_slope)
+        mask_slope = ~mask_out & ~mask_bottom
+        
+        y_fit[mask_bottom] = 1.0 - depth
+        y_fit[mask_slope] = 1.0 - depth * (t_start_slope - abs_t[mask_slope]) / ing
+        return y_fit
+
+    # Model 2: Triangle (V-Shape)
+    def triangle(t, depth, duration, t0):
+        abs_t = np.abs(t - t0)
+        y_fit = np.ones_like(t)
+        mask_in = abs_t < duration
+        y_fit[mask_in] = 1.0 - depth * (1.0 - abs_t[mask_in] / duration)
+        return y_fit
+
+    # Setup fitting bounds and guesses in dimensionless phase units
+    depth_guess = max(depth_est, 1e-4)
+    duration_guess = max(duration_phase, 0.005)
+    
+    p0_trap = [depth_guess, duration_guess, duration_guess / 3.0, 0.0]
+    bounds_trap = ([0.0, 0.001, 1e-5, -0.02], [1.0, 0.15, 0.1, 0.02])
+    
+    p0_tri = [depth_guess, duration_guess, 0.0]
+    bounds_tri = ([0.0, 0.001, -0.02], [1.0, 0.15, 0.02])
+    
+    try:
+        popt_trap, _ = opt.curve_fit(trapezoid, x, y, p0=p0_trap, bounds=bounds_trap)
+        ssr_trap = np.sum((y - trapezoid(x, *popt_trap))**2)
+    except Exception as e:
+        ssr_trap = np.sum((y - 1.0)**2)  # fallback to flat baseline
+        
+    try:
+        popt_tri, _ = opt.curve_fit(triangle, x, y, p0=p0_tri, bounds=bounds_tri)
+        ssr_tri = np.sum((y - triangle(x, *popt_tri))**2)
+    except Exception as e:
+        ssr_tri = np.sum((y - 1.0)**2)
+
+    # Avoid divide-by-zero
+    if ssr_tri <= 0:
+        return 1.0, False
+        
+    fit_ratio = float(ssr_trap / ssr_tri)
+    
+    # If the trapezoid fit is not significantly better than the triangle, it is V-shaped (binary)
+    # Standard threshold: ratio > 0.85
+    is_v_shape = fit_ratio > 0.85
+    
+    return fit_ratio, is_v_shape
+

@@ -29,11 +29,12 @@ def detect_transit(lc_flat):
         "period": best_period,
         "duration": best_duration,
         "depth": best_depth,
+        "transit_time": results.transit_time[best_index],
         "bls_results": results
     }
-def fold_lightcurve(lc_flat, period):
+def fold_lightcurve(lc_flat, period, epoch_time=None):
     """
-    Phase-fold the light curve using the detected period.
+    Phase-fold the light curve using the detected period and transit epoch.
     """
-    folded = lc_flat.fold(period=period)
+    folded = lc_flat.fold(period=period, epoch_time=epoch_time)
     return folded

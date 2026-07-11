@@ -6,12 +6,13 @@ from analysis.metrics import (
     odd_even_depth_check,
     compute_snr,
     secondary_eclipse_depth,
+    vet_transit_shape,
 )
 
 # ----------------------------
 # Human interpretation
 # ----------------------------
-def generate_interpretation(period, depth, odd_depth, even_depth, snr, verdict):
+def generate_interpretation(period, depth, odd_depth, even_depth, snr, verdict, fit_ratio, is_v_shape):
     lines = []
 
     if verdict == "No Significant Transit Detected":
@@ -35,7 +36,17 @@ def generate_interpretation(period, depth, odd_depth, even_depth, snr, verdict):
         f"The transit depth of {depth:.4f} corresponds to a planet-to-star radius ratio of approximately {np.sqrt(depth):.3f}."
     )
 
-    if abs(odd_depth - even_depth) < 0.001:
+    # Transit Shape Profile feedback
+    if is_v_shape:
+        lines.append(
+            f"Crucially, fitting models show a V-shaped profile (shape ratio {fit_ratio:.2f}), which strongly suggests an eclipsing binary star system rather than a planetary transit."
+        )
+    else:
+        lines.append(
+            f"Fitting models confirm a flat-bottomed U-shape profile (shape ratio {fit_ratio:.2f}), which is highly characteristic of a transiting exoplanet."
+        )
+
+    if abs(odd_depth - even_depth) < 0.002:
         lines.append(
             "Odd and even transits show consistent depths, reducing the likelihood of an eclipsing binary."
         )
@@ -49,9 +60,14 @@ def generate_interpretation(period, depth, odd_depth, even_depth, snr, verdict):
             "The short orbital period suggests a close-in planet orbiting its host star."
         )
 
-    lines.append(
-        "Overall, the signal exhibits characteristics consistent with a transiting exoplanet candidate."
-    )
+    if not is_v_shape:
+        lines.append(
+            "Overall, the signal exhibits characteristics consistent with a transiting exoplanet candidate."
+        )
+    else:
+        lines.append(
+            "Overall, the signal exhibits characteristics consistent with an eclipsing binary false positive."
+        )
 
     return " ".join(lines)
 
@@ -74,7 +90,7 @@ def classify_from_confidence(conf):
     else:
         return "High-Confidence Planet Candidate 🪐🟢"
 
-def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit_points, period):
+def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit_points, period, fit_ratio, is_v_shape):
     # 🚨 Only true hard gate
     if snr < 3:
         return 5.0
@@ -121,6 +137,17 @@ def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit
     else:
         score -= 10.0
 
+    # 6) Curve shape profile vetting (U-shape vs. V-shape)
+    if is_v_shape:
+        # Penalize V-shapes heavily since it indicates a binary star
+        score -= 40.0
+    else:
+        # Boost clean flat-bottomed U-shapes
+        if fit_ratio < 0.60:
+            score += 15.0
+        else:
+            score += 5.0
+
     return round(max(0.0, min(95.0, score)), 1)
 
 
@@ -143,9 +170,10 @@ def run_exoplanet_pipeline(tic_id: int):
     transit_result = detect_transit(lc_flat)
     period = float(transit_result["period"])
     depth = float(transit_result["depth"])
+    epoch = float(transit_result["transit_time"])
 
     # 4️⃣ Fold light curve
-    folded = fold_lightcurve(lc_flat, period)
+    folded = fold_lightcurve(lc_flat, period, epoch_time=epoch)
 
     # 5️⃣ Vetting metrics
     odd_depth, even_depth = odd_even_depth_check(lc_flat, period)
@@ -156,10 +184,13 @@ def run_exoplanet_pipeline(tic_id: int):
     star_radius = get_star_radius(str(tic_id))
     planet_radius = star_radius * np.sqrt(depth) * 109.2
 
+    # 5.6️⃣ V-shape vs U-shape profile fitting
+    duration_days = float(transit_result["duration"])
+    duration_phase = duration_days / period
+    fit_ratio, is_v_shape = vet_transit_shape(folded, depth, duration_phase, period)
+
     phase = folded.phase.value
     transit_points = int(np.sum((phase > -0.05) & (phase < 0.05)))
-
-    
 
     # 6️⃣ Confidence score (FIRST)
     conf = confidence_score(
@@ -169,15 +200,17 @@ def run_exoplanet_pipeline(tic_id: int):
         even_depth=even_depth,
         secondary_depth=secondary_depth,
         transit_points=transit_points,
-        period=period
-)
+        period=period,
+        fit_ratio=fit_ratio,
+        is_v_shape=is_v_shape
+    )
 
-# 7️⃣ Status derived from confidence (SECOND)
+    # 7️⃣ Status derived from confidence (SECOND)
     verdict = classify_from_confidence(conf)
 
-# 8️⃣ Interpretation (THIRD)
+    # 8️⃣ Interpretation (THIRD)
     interpretation = generate_interpretation(
-    period, depth, odd_depth, even_depth, snr, verdict
+        period, depth, odd_depth, even_depth, snr, verdict, fit_ratio, is_v_shape
     )
 
     
@@ -198,6 +231,8 @@ def run_exoplanet_pipeline(tic_id: int):
     "interpretation": interpretation,
     "star_radius": float(star_radius),
     "planet_radius": float(planet_radius),
+    "fit_ratio": float(fit_ratio),
+    "is_v_shape": bool(is_v_shape),
 
     # Raw light curve
     "time": lc_clean.time.value.tolist(),
