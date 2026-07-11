@@ -1,5 +1,5 @@
 import numpy as np
-from analysis.loader import load_tess_lightcurve
+from analysis.loader import load_tess_lightcurve, get_star_radius
 from analysis.preprocess import clean_and_flatten
 from analysis.transit import detect_transit, fold_lightcurve
 from analysis.metrics import (
@@ -148,9 +148,13 @@ def run_exoplanet_pipeline(tic_id: int):
     folded = fold_lightcurve(lc_flat, period)
 
     # 5️⃣ Vetting metrics
-    odd_depth, even_depth = odd_even_depth_check(folded)
+    odd_depth, even_depth = odd_even_depth_check(lc_flat, period)
     snr = compute_snr(folded, depth)
     secondary_depth = secondary_eclipse_depth(folded)
+
+    # 5.5️⃣ Dynamic star catalog lookup & physical radius scaling
+    star_radius = get_star_radius(str(tic_id))
+    planet_radius = star_radius * np.sqrt(depth) * 109.2
 
     phase = folded.phase.value
     transit_points = int(np.sum((phase > -0.05) & (phase < 0.05)))
@@ -192,6 +196,8 @@ def run_exoplanet_pipeline(tic_id: int):
     "verdict": verdict,
     "confidence": conf,
     "interpretation": interpretation,
+    "star_radius": float(star_radius),
+    "planet_radius": float(planet_radius),
 
     # Raw light curve
     "time": lc_clean.time.value.tolist(),

@@ -10,9 +10,13 @@ def detect_transit(lc_flat):
 
     bls = BoxLeastSquares(time, flux)
 
-    periods = np.linspace(0.5, 20, 10000)  # days
-    durations = np.linspace(0.01, 0.3, 10)
-
+    # Scientifically optimized frequency-spaced grid using autoperiod (clamped to 0.4 - 24 days)
+    try:
+        periods = bls.autoperiod(duration_min=0.01, duration_max=0.25, minimum_period=0.4, maximum_period=24)
+    except Exception:
+        periods = np.linspace(0.4, 24, 10000)  # fallback
+    
+    durations = np.linspace(0.01, 0.25, 10)
     results = bls.power(periods, durations)
 
     best_index = results.power.argmax()
