@@ -228,34 +228,57 @@ def run_exoplanet_pipeline(tic_id: int):
         period, depth, odd_depth, even_depth, snr, verdict, fit_ratio, is_v_shape
     )
 
-    
+    # 8.5️⃣ Optional AI Interpretation with NVIDIA Llama 3.1
+    from analysis.ai import generate_ai_interpretation
+    ai_results = generate_ai_interpretation({
+        "tic_id": tic_id,
+        "period": period,
+        "depth": depth,
+        "snr": snr,
+        "odd_depth": odd_depth,
+        "even_depth": even_depth,
+        "secondary_depth": secondary_depth,
+        "star_radius": star_radius,
+        "planet_radius": planet_radius,
+        "is_v_shape": is_v_shape,
+        "fit_ratio": fit_ratio,
+        "stellar_scatter": stellar_scatter,
+        "local_confidence": conf,
+        "local_verdict": verdict
+    })
 
+    # 9️⃣ RETURN JSON
+    res = {
+        "period": float(period),
+        "depth": float(depth),
+        "snr": float(snr),
+        "odd_depth": float(odd_depth),
+        "even_depth": float(even_depth),
+        "secondary_depth": float(secondary_depth),
+        "transit_points": int(transit_points),
+        "verdict": verdict,
+        "confidence": conf,
+        "interpretation": interpretation,
+        "star_radius": float(star_radius),
+        "planet_radius": float(planet_radius),
+        "fit_ratio": float(fit_ratio),
+        "is_v_shape": bool(is_v_shape),
+        "stellar_scatter": float(stellar_scatter),
+        "ai_used": False,
 
+        # Raw light curve
+        "time": lc_clean.time.value.tolist(),
+        "flux": lc_clean.flux.value.tolist(),
 
-    # 7️⃣ RETURN JSON
-    return {
-    "period": float(period),
-    "depth": float(depth),
-    "snr": float(snr),
-    "odd_depth": float(odd_depth),
-    "even_depth": float(even_depth),
-    "secondary_depth": float(secondary_depth),
-    "transit_points": int(transit_points),
-    "verdict": verdict,
-    "confidence": conf,
-    "interpretation": interpretation,
-    "star_radius": float(star_radius),
-    "planet_radius": float(planet_radius),
-    "fit_ratio": float(fit_ratio),
-    "is_v_shape": bool(is_v_shape),
-    "stellar_scatter": float(stellar_scatter),
+        # Folded light curve
+        "phase": folded.phase.value.tolist(),
+        "folded_flux": folded.flux.value.tolist(),
+    }
 
-    # Raw light curve
-    "time": lc_clean.time.value.tolist(),
-    "flux": lc_clean.flux.value.tolist(),
+    if ai_results.get("ai_used"):
+        res["ai_used"] = True
+        res["ai_verdict"] = ai_results["ai_verdict"]
+        res["ai_confidence"] = ai_results["ai_confidence"]
+        res["ai_interpretation"] = ai_results["ai_interpretation"]
 
-    # Folded light curve
-    "phase": folded.phase.value.tolist(),
-    "folded_flux": folded.flux.value.tolist(),
-}
-
+    return res
