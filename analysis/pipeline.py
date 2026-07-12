@@ -1,5 +1,5 @@
 import numpy as np
-from analysis.loader import load_tess_lightcurve, get_star_radius
+from analysis.loader import load_tess_lightcurve, get_stellar_properties
 from analysis.preprocess import clean_and_flatten
 from analysis.transit import detect_transit, fold_lightcurve
 from analysis.metrics import (
@@ -73,25 +73,24 @@ def generate_interpretation(period, depth, odd_depth, even_depth, snr, verdict, 
     return " ".join(lines)
 
 
-
 # ----------------------------
-# 8-status classifier
+# 8-status classifier (emojis removed)
 # ----------------------------
 def classify_from_confidence(conf):
     if conf < 10:
         return "No Significant Transit Detected"
     elif conf < 30:
-        return "Likely False Positive ❌"
+        return "Likely False Positive"
     elif conf < 50:
-        return "Marginal Planet Candidate ⚠️"
+        return "Marginal Planet Candidate"
     elif conf < 70:
-        return "Planet Candidate 🪐"
+        return "Planet Candidate"
     elif conf < 85:
-        return "Strong Planet Candidate 🟢"
+        return "Strong Planet Candidate"
     else:
-        return "High-Confidence Planet Candidate 🪐🟢"
+        return "High-Confidence Planet Candidate"
 
-def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit_points, period, fit_ratio, is_v_shape, stellar_scatter):
+def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit_points, period, fit_ratio, is_v_shape, stellar_scatter, planet_density=None, planet_radius=None):
     # 🚨 Only true hard gate
     if snr < 3:
         return 5.0
@@ -159,10 +158,16 @@ def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit
         else:
             score += 5.0
 
+    # 7) Physical density constraints (algorithm tuning)
+    if planet_density is not None and planet_radius is not None:
+        if planet_density > 35.0 or planet_density < 0.05:
+            score -= 25.0  # Physically implausible density
+        elif planet_radius > 4.0 and planet_density > 12.0:
+            score -= 20.0  # Gas giant with rocky density is unlikely (likely a binary star)
+        elif planet_radius < 2.0 and planet_density < 0.5:
+            score -= 15.0  # Very small planet with gas-giant density is implausible
+
     return round(max(0.0, min(95.0, score)), 1)
-
-
-
 
 
 # ----------------------------
@@ -192,11 +197,45 @@ def run_exoplanet_pipeline(tic_id: int):
     secondary_depth = secondary_eclipse_depth(folded)
 
     # 5.5️⃣ Dynamic star catalog lookup & physical radius scaling
-    star_radius = get_star_radius(str(tic_id))
+    star_props = get_stellar_properties(str(tic_id))
+    star_radius = star_props["rad"]
+    star_temp = star_props["teff"]
+    star_mass = star_props["mass"]
+
     planet_radius = star_radius * np.sqrt(depth) * 109.2
 
-    # 5.6️⃣ V-shape vs U-shape profile fitting
+    # 5.5.1️⃣ Advanced Keplerian & physical features (Tuned Algorithm)
     duration_days = float(transit_result["duration"])
+    duration_hours = duration_days * 24.0
+    
+    # Semi-major axis in AU (Kepler's Third Law)
+    semi_major_axis = ((star_mass * (period / 365.25)**2)) ** (1/3) if period > 0 else 0.0
+    # Semi-major axis in Solar Radii
+    semi_major_axis_solar = semi_major_axis * 215.032
+    # a/Rs ratio
+    a_over_rs = semi_major_axis_solar / star_radius if star_radius > 0 else 0.0
+    
+    # Equilibrium Temperature in K (Assuming albedo A = 0.3)
+    equilibrium_temp = star_temp * 0.9147 * np.sqrt(star_radius / (2.0 * semi_major_axis_solar)) if semi_major_axis_solar > 0 else 0.0
+    
+    # Insolation flux relative to Earth
+    insolation_flux = (star_radius**2 / semi_major_axis**2) * (star_temp / 5778.0)**4 if semi_major_axis > 0 else 0.0
+    
+    # Stellar density in Solar Units (g/cm^3 relative to Sun)
+    stellar_density = star_mass / (star_radius**3) if star_radius > 0 else 0.0
+    
+    # Estimated planet mass in Earth masses (empirical scaling Chen & Kipping 2017)
+    if planet_radius < 1.5:
+        planet_mass = planet_radius**3.7
+    elif planet_radius < 4.0:
+        planet_mass = 2.7 * (planet_radius**1.3)
+    else:
+        planet_mass = 0.1 * (planet_radius**2)
+        
+    # Planet density in g/cm^3
+    planet_density = 5.515 * (planet_mass / (planet_radius**3)) if planet_radius > 0 else 0.0
+
+    # 5.6️⃣ V-shape vs U-shape profile fitting
     duration_phase = duration_days / period
     fit_ratio, is_v_shape = vet_transit_shape(folded, depth, duration_phase, period)
 
@@ -206,7 +245,7 @@ def run_exoplanet_pipeline(tic_id: int):
     # 5.7️⃣ Compute stellar scatter baseline noise
     stellar_scatter = compute_stellar_scatter(folded)
 
-    # 6️⃣ Confidence score (FIRST)
+    # 6️⃣ Confidence score (FIRST) - incorporating physical constraints
     conf = confidence_score(
         depth=depth,
         snr=snr,
@@ -217,7 +256,9 @@ def run_exoplanet_pipeline(tic_id: int):
         period=period,
         fit_ratio=fit_ratio,
         is_v_shape=is_v_shape,
-        stellar_scatter=stellar_scatter
+        stellar_scatter=stellar_scatter,
+        planet_density=planet_density,
+        planet_radius=planet_radius
     )
 
     # 7️⃣ Status derived from confidence (SECOND)
@@ -239,7 +280,17 @@ def run_exoplanet_pipeline(tic_id: int):
         "even_depth": even_depth,
         "secondary_depth": secondary_depth,
         "star_radius": star_radius,
+        "star_temp": star_temp,
+        "star_mass": star_mass,
+        "stellar_density": stellar_density,
         "planet_radius": planet_radius,
+        "planet_mass": planet_mass,
+        "planet_density": planet_density,
+        "duration_hours": duration_hours,
+        "semi_major_axis": semi_major_axis,
+        "semi_major_axis_solar": semi_major_axis_solar,
+        "equilibrium_temp": equilibrium_temp,
+        "insolation_flux": insolation_flux,
         "is_v_shape": is_v_shape,
         "fit_ratio": fit_ratio,
         "stellar_scatter": stellar_scatter,
@@ -260,7 +311,16 @@ def run_exoplanet_pipeline(tic_id: int):
         "confidence": conf,
         "interpretation": interpretation,
         "star_radius": float(star_radius),
+        "star_temp": float(star_temp),
+        "star_mass": float(star_mass),
+        "stellar_density": float(stellar_density),
         "planet_radius": float(planet_radius),
+        "planet_mass": float(planet_mass),
+        "planet_density": float(planet_density),
+        "duration_hours": float(duration_hours),
+        "semi_major_axis": float(semi_major_axis),
+        "equilibrium_temp": float(equilibrium_temp),
+        "insolation_flux": float(insolation_flux),
         "fit_ratio": float(fit_ratio),
         "is_v_shape": bool(is_v_shape),
         "stellar_scatter": float(stellar_scatter),

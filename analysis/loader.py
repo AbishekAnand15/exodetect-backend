@@ -60,9 +60,10 @@ def load_tess_lightcurve(tic_id: str):
     else:
         return lcs[0]
 
-def get_star_radius(tic_id: str):
+def get_stellar_properties(tic_id: str):
     """
-    Get the star radius in Solar Radii from the TESS Input Catalog (TIC) with robust lookups and fallbacks.
+    Get stellar properties (radius, teff, mass) from TESS Input Catalog (TIC)
+    with robust lookups and fallbacks.
     """
     import json
     import urllib.request
@@ -70,9 +71,9 @@ def get_star_radius(tic_id: str):
 
     # Hardcoded values for quick-select targets to ensure instant, stable response
     lookups = {
-        141872132: 1.06,  # Kepler-10 (Solar Radii)
-        25155310: 1.28,   # WASP-126 (Solar Radii)
-        100100827: 1.10   # Typical binary star primary
+        141872132: {"rad": 1.06, "teff": 5627.0, "mass": 0.90},  # Kepler-10 (Solar Radii, K, Solar Mass)
+        25155310: {"rad": 1.28, "teff": 5800.0, "mass": 1.10},   # WASP-126
+        100100827: {"rad": 1.10, "teff": 6100.0, "mass": 1.15}   # Typical binary star primary
     }
     
     try:
@@ -82,13 +83,15 @@ def get_star_radius(tic_id: str):
     except Exception:
         pass
         
-    # Query MAST API JSON service directly to retrieve the star radius
+    props = {"rad": 1.0, "teff": 5778.0, "mass": 1.0}
+    
+    # Query MAST API JSON service directly to retrieve the star parameters
     try:
         payload = {
             "service": "Mast.Catalogs.Filtered.Tic.Rows",
             "format": "json",
             "params": {
-                "columns": "rad",
+                "columns": "rad,teff,mass",
                 "filters": [
                     {
                         "paramName": "ID",
@@ -109,12 +112,31 @@ def get_star_radius(tic_id: str):
         with urllib.request.urlopen(req, timeout=3) as res:
             res_data = json.loads(res.read().decode())
             if res_data and 'data' in res_data and len(res_data['data']) > 0:
-                rad = res_data['data'][0].get('rad')
+                row = res_data['data'][0]
+                rad = row.get('rad')
+                teff = row.get('teff')
+                mass = row.get('mass')
+                
                 if rad is not None:
-                    return float(rad)
+                    props["rad"] = float(rad)
+                if teff is not None:
+                    props["teff"] = float(teff)
+                if mass is not None:
+                    props["mass"] = float(mass)
+                else:
+                    props["mass"] = props["rad"] # Empirically mass approximates radius on MS
+                return props
     except Exception as e:
         print(f"MAST direct query failed: {e}")
         
-    return 1.0  # default fallback (1 Solar Radius)
+    # Standard fallback if query fails
+    props["mass"] = props["rad"]
+    return props
+
+def get_star_radius(tic_id: str):
+    """
+    Get the star radius in Solar Radii (kept for backward compatibility).
+    """
+    return get_stellar_properties(tic_id)["rad"]
 
 

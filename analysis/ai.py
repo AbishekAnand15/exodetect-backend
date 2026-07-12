@@ -50,6 +50,8 @@ def generate_ai_interpretation(metrics: dict) -> dict:
         "You are an AI-powered Kepler and TESS exoplanet validation expert. Your job is to analyze "
         "raw transit metrics and output a JSON response containing a verdict/classification, a confidence score (0-100), "
         "and a scientific interpretation (3-5 sentences) summarizing the data.\n\n"
+        "CRITICAL: Do NOT include any emojis in your output. The 'verdict' and 'interpretation' fields "
+        "must be clean plain text without any emojis (like 🪐, ❌, ✨, ⚠️, 🟢, etc.).\n\n"
         "Guidance on metrics:\n"
         "- A periodic transit (depth) corresponding to a radius ratio of a planet is characteristic of a transiting exoplanet.\n"
         "- A V-shaped profile (is_v_shape = True) strongly suggests an eclipsing binary star system rather than a planet.\n"
@@ -59,9 +61,9 @@ def generate_ai_interpretation(metrics: dict) -> dict:
         "- Short periods (period < 1.5 days) have high binary probability but can be Hot Jupiters.\n\n"
         "Format the output strictly as a JSON object with these exact keys:\n"
         "{\n"
-        "  \"verdict\": \"<A concise label, e.g. High-Confidence Planet Candidate 🪐🟢, Planet Candidate 🪐, Likely False Positive ❌, etc.>\",\n"
+        "  \"verdict\": \"<A concise label, e.g. High-Confidence Planet Candidate, Planet Candidate, Likely False Positive, etc. Do NOT include any emojis.>\",\n"
         "  \"confidence\": <float percentage 0.0 to 100.0>,\n"
-        "  \"interpretation\": \"<A detailed, scientifically accurate explanation of the metrics. Mention the U-shape or V-shape profile, depth consistency, SNR, and estimated radii ratio.>\"\n"
+        "  \"interpretation\": \"<A detailed, scientifically accurate explanation of the metrics. Mention the U-shape or V-shape profile, depth consistency, SNR, and estimated radii ratio. Do NOT include emojis.>\"\n"
         "}\n"
         "Do not include any formatting or explanation outside the JSON block. Output ONLY the JSON."
     )
@@ -70,12 +72,22 @@ def generate_ai_interpretation(metrics: dict) -> dict:
 Stellar Transit Parameters for analysis (TIC ID: {metrics.get('tic_id', 'Unknown')}):
 - Period: {metrics.get('period', 0.0):.4f} days
 - Transit Depth: {metrics.get('depth', 0.0):.6f} (Normalized flux drop)
+- Transit Duration: {metrics.get('duration_hours', 0.0):.2f} hours
+- Ingress/Duration Ratio: {metrics.get('ingress_ratio', 0.0):.3f}
 - Signal-to-Noise Ratio (SNR): {metrics.get('snr', 0.0):.2f}
 - Odd Transit Depth: {metrics.get('odd_depth', 0.0):.6f}
 - Even Transit Depth: {metrics.get('even_depth', 0.0):.6f}
 - Secondary Eclipse Depth: {metrics.get('secondary_depth', 0.0):.6f}
 - Host Star Radius: {metrics.get('star_radius', 0.0):.2f} Solar Radii
+- Host Star Temperature: {metrics.get('star_temp', 0.0):.1f} K
+- Host Star Mass: {metrics.get('star_mass', 0.0):.2f} Solar Masses
+- Stellar Density: {metrics.get('stellar_density', 0.0):.4f} Solar Units
 - Calculated Planet Radius: {metrics.get('planet_radius', 0.0):.2f} Earth Radii
+- Estimated Planet Mass: {metrics.get('planet_mass', 0.0):.2f} Earth Masses
+- Estimated Planet Density: {metrics.get('planet_density', 0.0):.3f} g/cm^3
+- Semi-Major Axis: {metrics.get('semi_major_axis', 0.0):.4f} AU ({metrics.get('semi_major_axis_solar', 0.0):.2f} Solar Radii)
+- Planet Equilibrium Temperature: {metrics.get('equilibrium_temp', 0.0):.1f} K
+- Insolation Flux: {metrics.get('insolation_flux', 0.0):.2f} Earth Units
 - Profile Shape: {"V-Shape" if metrics.get('is_v_shape') else "U-Shape"} (Shape Fit Ratio: {metrics.get('fit_ratio', 0.0):.2f})
 - Stellar Baseline Noise (Scatter): {metrics.get('stellar_scatter', 0.0):.6f}
 - Local Heuristic Score: {metrics.get('local_confidence', 0.0)}%
