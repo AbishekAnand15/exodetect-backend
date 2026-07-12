@@ -224,13 +224,19 @@ def run_exoplanet_pipeline(tic_id: int):
     # Stellar density in Solar Units (g/cm^3 relative to Sun)
     stellar_density = star_mass / (star_radius**3) if star_radius > 0 else 0.0
     
-    # Estimated planet mass in Earth masses (empirical scaling Chen & Kipping 2017)
+    # Estimated planet mass in Earth masses (empirical scaling tuned to solar-system & exoplanet values)
     if planet_radius < 1.5:
+        # Rocky regime
         planet_mass = planet_radius**3.7
     elif planet_radius < 4.0:
-        planet_mass = 2.7 * (planet_radius**1.3)
+        # Sub-Neptune / Neptune regime
+        planet_mass = 1.43 * (planet_radius**1.7)
+    elif planet_radius < 11.0:
+        # Sub-Saturn / Saturn / Jovian regime
+        planet_mass = 0.8 * (planet_radius**2.1)
     else:
-        planet_mass = 0.1 * (planet_radius**2)
+        # Giant Jovian regime (capped around Jupiter mass of 317.8 Earth masses)
+        planet_mass = 317.8
         
     # Planet density in g/cm^3
     planet_density = 5.515 * (planet_mass / (planet_radius**3)) if planet_radius > 0 else 0.0
