@@ -161,9 +161,10 @@ def generate_ai_interpretation(metrics: dict) -> dict:
         "  50-70%          : Planet Candidate          (moderate evidence, further vetting needed)\n"
         "  70-85%          : Strong Planet Candidate   (good photometric evidence, few false-positive indicators)\n"
         "  85-95%          : High-Confidence Planet Candidate (strong vetting, Gaia checks pass)\n"
-        "  > 95%           : Validation-Level Candidate (reserved — currently not reachable without ground follow-up)\n"
+        "  > 95%           : Validation-Level Candidate (requires confidence > 95.0% AND at least one external confirmation source)\n"
         "CONFIDENCE CAPS:\n"
-        "  - NEVER output confidence > 95.0% under any circumstances.\n"
+        "  - NEVER output confidence > 95.0% unless at least one external confirmation source is listed in the user prompt.\n"
+        "  - If no external confirmation sources are listed in the user prompt, the absolute maximum allowed confidence is 95.0%.\n"
         "  - To reach 85-95% (High-Confidence), ALL four must pass: RUWE < 1.2, neighbor_count = 0, \n"
         "    dilution_factor < 0.02, AND density_bonus > 0.\n"
         "  - If ANY of the four Gaia/density checks fail, cap at 85.0%.\n\n"
@@ -171,20 +172,30 @@ def generate_ai_interpretation(metrics: dict) -> dict:
         # ── Output format ─────────────────────────────────────────────────
         "Output STRICTLY as a JSON object with exactly these three keys:\n"
         "{\n"
-        "  \"verdict\": \"<MUST be one of exactly: 'High-Confidence Planet Candidate' | 'Strong Planet Candidate' | "
+        "  \"verdict\": \"<MUST be one of exactly: 'Validation-Level Candidate' | 'High-Confidence Planet Candidate' | 'Strong Planet Candidate' | "
         "'Planet Candidate' | 'Possible Signal' | 'Likely False Positive' | 'No Significant Transit Detected'. "
         "The verdict MUST match the confidence band above. No emojis.>\",\n"
-        "  \"confidence\": <float 0.0-95.0>,\n"
+        "  \"confidence\": <float 0.0-100.0>,\n"
         "  \"interpretation\": \"<3-5 sentences. Cover: (1) transit shape and what it implies, "
         "(2) planet size class [from radius taxonomy] and density label [from density taxonomy], "
         "(3) equilibrium temperature regime and the correct Hot/Warm/Ultra-Hot size-class name — "
         "NEVER mention habitability if T_eq > 320 K, "
-        "(4) Gaia RUWE and contamination result if provided, "
-        "(5) overall vetting conclusion referencing photometric consistency score and multi-sector stability. "
-        "No emojis. No albedo speculation. No invented values.>\",\n"
+        "(4) Gaia RUWE and contamination result if available, "
+        "(5) overall vetting conclusion referencing photometric consistency score and multi-sector stability, "
+        "mentioning external confirmation sources if they exist. No emojis. No albedo speculation. No invented values.>\",\n"
         "}\n"
         "Do not include any text, markdown, or explanation outside the JSON block. Output ONLY the JSON."
     )
+
+    # Format external confirmation sources
+    ext_confirmations = metrics.get('external_confirmations', [])
+    if ext_confirmations:
+        ext_confirmations_str = "\n".join([
+            f"  * {item.get('pl_name')} (Confirmed via {item.get('discoverymethod', 'Unknown method')})"
+            for item in ext_confirmations
+        ])
+    else:
+        ext_confirmations_str = "  None"
 
     user_content = f"""
 Stellar Transit Parameters for analysis (TIC ID: {metrics.get('tic_id', 'Unknown')}):
@@ -222,6 +233,9 @@ Keplerian Stellar Density Consistency:
 Multi-Sector Stability:
 - Number of TESS Sectors Analysed: {metrics.get('sector_count', 1)}
 - Stability Score Contribution: {metrics.get('stability_bonus', 0.0):+.1f} pts  (positive = depth and period stable across sectors; negative = variable)
+
+External Confirmation Sources:
+{ext_confirmations_str}
 """
 
     payload = {

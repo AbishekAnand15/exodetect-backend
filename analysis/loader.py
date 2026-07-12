@@ -235,3 +235,47 @@ def get_gaia_vetting(tic_id: str, ra: float = None, dec: float = None):
 
     _gaia_cache[cache_key] = result
     return result
+
+_exoarchive_cache = {}
+
+def check_exoplanet_archive_confirmation(tic_id: str) -> list:
+    """
+    Query the NASA Exoplanet Archive TAP service to see if this TIC ID
+    already has confirmed exoplanets, including their discovery methods.
+    """
+    tic_id = str(tic_id).strip()
+    if tic_id in _exoarchive_cache:
+        return _exoarchive_cache[tic_id]
+        
+    url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+    query = f"select pl_name, hostname, discoverymethod from ps where tic_id = 'TIC {tic_id}' or tic_id = '{tic_id}'"
+    params = {
+        "query": query,
+        "format": "json"
+    }
+    
+    try:
+        import requests
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            # De-duplicate entries by pl_name
+            seen = set()
+            unique_planets = []
+            for item in data:
+                pl_name = item.get("pl_name")
+                if pl_name and pl_name not in seen:
+                    seen.add(pl_name)
+                    unique_planets.append({
+                        "pl_name": pl_name,
+                        "hostname": item.get("hostname"),
+                        "discoverymethod": item.get("discoverymethod")
+                    })
+            _exoarchive_cache[tic_id] = unique_planets
+            return unique_planets
+    except Exception as e:
+        print(f"NASA Exoplanet Archive lookup failed: {e}")
+        
+    _exoarchive_cache[tic_id] = []
+    return []
+

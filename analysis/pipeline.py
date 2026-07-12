@@ -81,7 +81,7 @@ def generate_interpretation(period, depth, odd_depth, even_depth, snr, verdict, 
 # ----------------------------
 # 8-status classifier (emojis removed)
 # ----------------------------
-def classify_from_confidence(conf):
+def classify_from_confidence(conf, has_external_confirmation=False):
     if conf < 10:
         return "No Significant Transit Detected"
     elif conf < 30:
@@ -92,8 +92,14 @@ def classify_from_confidence(conf):
         return "Planet Candidate"
     elif conf < 85:
         return "Strong Planet Candidate"
-    else:
+    elif conf <= 95:
         return "High-Confidence Planet Candidate"
+    else:
+        if has_external_confirmation:
+            return "Validation-Level Candidate"
+        else:
+            return "High-Confidence Planet Candidate"
+
 
 def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit_points, period, fit_ratio, is_v_shape, stellar_scatter, planet_density=None, planet_radius=None):
     # 🚨 Only true hard gate
@@ -332,11 +338,21 @@ def run_exoplanet_pipeline(tic_id: int):
     # 6.3 Multi-sector stability (Module C)
     stability_bonus = multi_sector_stability_score(sector_depths, sector_periods)
 
+    # 6.4 Query NASA Exoplanet Archive for external confirmation
+    from analysis.loader import check_exoplanet_archive_confirmation
+    external_planets = check_exoplanet_archive_confirmation(str(tic_id))
+    has_external_confirmation = len(external_planets) > 0
+
     # Combine vetting bonuses into total confidence (capped at 100)
     conf = round(max(0.0, min(100.0, conf + gaia_bonus + density_bonus + stability_bonus)), 1)
+    
+    # Validation-Level Candidate (>95) requires external confirmation source.
+    # Otherwise, cap confidence at 95.0.
+    if not has_external_confirmation:
+        conf = min(95.0, conf)
 
     # 7️⃣ Status derived from confidence (SECOND)
-    verdict = classify_from_confidence(conf)
+    verdict = classify_from_confidence(conf, has_external_confirmation)
 
     # 8️⃣ Interpretation (THIRD)
     interpretation = generate_interpretation(
@@ -378,6 +394,7 @@ def run_exoplanet_pipeline(tic_id: int):
         "density_bonus": density_bonus,
         "stability_bonus": stability_bonus,
         "sector_count": len(sector_depths),
+        "external_confirmations": external_planets,
     })
 
     # 9️⃣ RETURN JSON
@@ -414,7 +431,9 @@ def run_exoplanet_pipeline(tic_id: int):
         "density_consistency_score": float(density_bonus),
         "stability_score": float(stability_bonus),
         "sector_count": int(len(sector_depths)),
+        "external_confirmations": external_planets,
         "ai_used": False,
+
 
         # Raw light curve
         "time": lc_clean.time.value.tolist(),
