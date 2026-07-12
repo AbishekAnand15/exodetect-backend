@@ -85,12 +85,15 @@ def generate_ai_interpretation(metrics: dict) -> dict:
         "- Use the following confidence range mapping:\n"
         "  * 70.0% to 80.0%: Planet Candidate\n"
         "  * 80.0% to 90.0%: Strong Planet Candidate\n"
-        "  * Never output a score above 90.0% for any positive candidate.\n\n"
+        "  * Never output a score above 95.0% unless the candidate passes all of the following:\n"
+        "      (a) RUWE < 1.2 (well-behaved single star), (b) neighbor count = 0 (no aperture contamination),\n"
+        "      (c) dilution factor < 0.02, (d) stellar density consistency score > 0 (Keplerian geometry matches catalog).\n"
+        "  * For candidates that do NOT pass all four checks above, cap confidence at 90.0%.\n\n"
         "Format the output strictly as a JSON object with these exact keys:\n"
         "{\n"
         "  \"verdict\": \"<A concise label, e.g. High-Confidence Planet Candidate, Planet Candidate, Likely False Positive, etc. Do NOT include any emojis.>\",\n"
-        "  \"confidence\": <float percentage 0.0 to 90.0>,\n"
-        "  \"interpretation\": \"<A detailed, scientifically accurate explanation of the metrics. Mention the shape profile, density, estimated temperature, and albedo. Use the sizing and density taxonomy terms correctly. Do NOT include emojis.>\"\n"
+        "  \"confidence\": <float percentage 0.0 to 95.0>,\n"
+        "  \"interpretation\": \"<A detailed, scientifically accurate explanation of the metrics. Mention the shape profile, density, estimated temperature, and albedo. Mention Gaia contamination checks and stellar density consistency where relevant. Use the sizing and density taxonomy terms correctly. Do NOT include emojis.>\"\n"
         "}\n"
         "Do not include any formatting or explanation outside the JSON block. Output ONLY the JSON."
     )
@@ -104,7 +107,7 @@ Stellar Transit Parameters for analysis (TIC ID: {metrics.get('tic_id', 'Unknown
 - Signal-to-Noise Ratio (SNR): {metrics.get('snr', 0.0):.2f}
 - Odd Transit Depth: {metrics.get('odd_depth', 0.0):.6f}
 - Even Transit Depth: {metrics.get('even_depth', 0.0):.6f}
-- Secondary Eclipse Depth: {metrics.get('secondary_depth', 0.0):.6f}
+- Secondary Eclipse: {"No significant secondary eclipse detected" if abs(metrics.get('secondary_depth', 0.0)) < 0.000001 else f"Depth = {metrics.get('secondary_depth', 0.0):.6f}"}
 - Host Star Radius: {metrics.get('star_radius', 0.0):.2f} Solar Radii
 - Host Star Temperature: {metrics.get('star_temp', 0.0):.1f} K
 - Host Star Mass: {metrics.get('star_mass', 0.0):.2f} Solar Masses
@@ -119,6 +122,19 @@ Stellar Transit Parameters for analysis (TIC ID: {metrics.get('tic_id', 'Unknown
 - Stellar Baseline Noise (Scatter): {metrics.get('stellar_scatter', 0.0):.6f}
 - Photometric Consistency Score: {metrics.get('local_confidence', 0.0)}%
 - Photometric Vetting Verdict: "{metrics.get('local_verdict', '')}"
+
+Gaia DR3 Contamination Vetting:
+- Gaia RUWE: {metrics.get('gaia_ruwe', 1.0):.3f} (< 1.2 = well-behaved single star; > 1.4 = likely unresolved binary)
+- Bright Neighbours within 1 TESS Pixel (21 arcsec): {metrics.get('gaia_neighbor_count', 0)}
+- Aperture Flux Dilution Factor: {metrics.get('gaia_dilution_factor', 0.0):.4f} (< 0.02 = negligible contamination)
+- Gaia Vetting Score Contribution: {metrics.get('gaia_bonus', 0.0):+.1f} pts
+
+Keplerian Stellar Density Consistency:
+- Density Consistency Score Contribution: {metrics.get('density_bonus', 0.0):+.1f} pts  (positive = transit geometry matches catalog star; negative = mismatch suggests background event)
+
+Multi-Sector Stability:
+- Number of TESS Sectors Analysed: {metrics.get('sector_count', 1)}
+- Stability Score Contribution: {metrics.get('stability_bonus', 0.0):+.1f} pts  (positive = depth and period stable across sectors; negative = variable)
 """
 
     payload = {

@@ -1,5 +1,10 @@
 import numpy as np
-from analysis.loader import load_tess_lightcurve, get_stellar_properties
+from analysis.loader import load_tess_lightcurve, get_stellar_properties, get_gaia_vetting
+from analysis.vetting import (
+    gaia_contamination_score,
+    stellar_density_consistency_score,
+    multi_sector_stability_score,
+)
 from analysis.preprocess import clean_and_flatten
 from analysis.transit import detect_transit, fold_lightcurve
 from analysis.metrics import (
@@ -167,17 +172,62 @@ def confidence_score(depth, snr, odd_depth, even_depth, secondary_depth, transit
         elif planet_radius < 2.0 and planet_density < 0.5:
             score -= 15.0  # Very small planet with gas-giant density is implausible
 
-    return round(max(0.0, min(95.0, score)), 1)
+    return round(max(0.0, min(100.0, score)), 1)
 
 
 # ----------------------------
 # Main pipeline
 # ----------------------------
 def run_exoplanet_pipeline(tic_id: int):
-    # 1️⃣ Load light curve
-    lc = load_tess_lightcurve(tic_id)
-    if lc is None:
+    # 1️⃣ Load light curve (collect per-sector data for multi-sector stability test)
+    import lightkurve as lk
+    sector_depths = []
+    sector_periods = []
+
+    search = lk.search_lightcurve(f"TIC {tic_id}", mission="TESS")
+    if len(search) == 0:
         return {"error": "No TESS light curve found for this TIC ID"}
+
+    import os
+    table = search.table[:3]
+    download_dir = "/tmp" if os.name != 'nt' else search._default_download_dir()
+    lcs = []
+    for i in range(len(table)):
+        row = table[i:i+1]
+        path = os.path.join(
+            download_dir.rstrip("/"), "mastDownload",
+            row["obs_collection"][0], row["obs_id"][0], row["productFilename"][0]
+        )
+        if not os.path.exists(path):
+            try:
+                from astroquery.mast import Observations
+                dl = Observations.download_products(row, mrp_only=False, download_dir=download_dir)[0]
+                if dl["Status"] == "COMPLETE":
+                    path = dl["Local Path"]
+            except Exception:
+                continue
+        if os.path.exists(path):
+            try:
+                lcs.append(lk.read(path))
+            except Exception:
+                pass
+
+    if len(lcs) == 0:
+        return {"error": "No TESS light curve found for this TIC ID"}
+
+    # Per-sector depth and period for stability test
+    from analysis.preprocess import clean_and_flatten
+    from analysis.transit import detect_transit
+    for _lc in lcs:
+        try:
+            _, _flat = clean_and_flatten(_lc)
+            _tr = detect_transit(_flat)
+            sector_depths.append(float(_tr["depth"]))
+            sector_periods.append(float(_tr["period"]))
+        except Exception:
+            pass
+
+    lc = lk.LightCurveCollection(lcs).stitch() if len(lcs) > 1 else lcs[0]
 
     # 2️⃣ Clean & flatten
     lc_clean, lc_flat = clean_and_flatten(lc)
@@ -267,6 +317,24 @@ def run_exoplanet_pipeline(tic_id: int):
         planet_radius=planet_radius
     )
 
+    # 6.1 Gaia DR3 vetting (Module A)
+    gaia_data = get_gaia_vetting(str(tic_id))
+    gaia_bonus = gaia_contamination_score(gaia_data)
+
+    # 6.2 Stellar density consistency (Module B)
+    density_bonus = stellar_density_consistency_score(
+        period=period,
+        a_over_rs=a_over_rs,
+        stellar_density_catalog=stellar_density,
+        duration_hours=duration_hours
+    )
+
+    # 6.3 Multi-sector stability (Module C)
+    stability_bonus = multi_sector_stability_score(sector_depths, sector_periods)
+
+    # Combine vetting bonuses into total confidence (capped at 100)
+    conf = round(max(0.0, min(100.0, conf + gaia_bonus + density_bonus + stability_bonus)), 1)
+
     # 7️⃣ Status derived from confidence (SECOND)
     verdict = classify_from_confidence(conf)
 
@@ -301,7 +369,15 @@ def run_exoplanet_pipeline(tic_id: int):
         "fit_ratio": fit_ratio,
         "stellar_scatter": stellar_scatter,
         "local_confidence": conf,
-        "local_verdict": verdict
+        "local_verdict": verdict,
+        # Vetting module results
+        "gaia_ruwe": gaia_data.get("ruwe", 1.0),
+        "gaia_neighbor_count": gaia_data.get("neighbor_count", 0),
+        "gaia_dilution_factor": gaia_data.get("dilution_factor", 0.0),
+        "gaia_bonus": gaia_bonus,
+        "density_bonus": density_bonus,
+        "stability_bonus": stability_bonus,
+        "sector_count": len(sector_depths),
     })
 
     # 9️⃣ RETURN JSON
@@ -330,6 +406,14 @@ def run_exoplanet_pipeline(tic_id: int):
         "fit_ratio": float(fit_ratio),
         "is_v_shape": bool(is_v_shape),
         "stellar_scatter": float(stellar_scatter),
+        # Vetting module outputs
+        "gaia_ruwe": float(gaia_data.get("ruwe", 1.0)),
+        "gaia_neighbor_count": int(gaia_data.get("neighbor_count", 0)),
+        "gaia_dilution_factor": float(gaia_data.get("dilution_factor", 0.0)),
+        "gaia_score": float(gaia_bonus),
+        "density_consistency_score": float(density_bonus),
+        "stability_score": float(stability_bonus),
+        "sector_count": int(len(sector_depths)),
         "ai_used": False,
 
         # Raw light curve
