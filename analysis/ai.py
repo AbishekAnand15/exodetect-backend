@@ -50,51 +50,102 @@ def generate_ai_interpretation(metrics: dict) -> dict:
         "You are an AI-powered Kepler and TESS exoplanet validation expert. Your job is to analyze "
         "raw transit metrics and output a JSON response containing a verdict/classification, a confidence score (0-100), "
         "and a scientific interpretation (3-5 sentences) summarizing the data.\n\n"
+
         "CRITICAL: Do NOT include any emojis in your output. The 'verdict' and 'interpretation' fields "
         "must be clean plain text without any emojis (like 🪐, ❌, ✨, ⚠️, 🟢, etc.).\n\n"
-        "Guidance on Classification Taxonomy:\n"
-        "- Classify candidate planets by radius (R_p). Use ONLY the following boundaries and labels:\n"
-        "  * R_p < 1.5 Earth Radii      : Rocky planet (Earth-sized or smaller)\n"
-        "  * 1.5 <= R_p < 4.0 Earth Radii : Super-Earth\n"
-        "  * 4.0 <= R_p < 6.0 Earth Radii : Mini-Neptune / Sub-Neptune\n"
-        "  * 6.0 <= R_p < 10.0 Earth Radii: Sub-Saturn (also acceptable: 'inflated sub-Saturn', 'sub-Jovian gas giant'; do NOT call this Jupiter-sized)\n"
-        "  * 10.0 <= R_p < 15.0 Earth Radii: Jupiter-sized gas giant (Jupiter = 11.2 Earth Radii)\n"
-        "  * R_p >= 15.0 Earth Radii     : Likely stellar companion, brown dwarf candidate, or eclipsing binary\n"
-        "  CRITICAL: A planet of 6.85 Earth Radii is SUB-SATURN, NOT Jupiter-sized. Jupiter is 11.2 Earth Radii.\n\n"
-        "- Interpret candidate density (rho_p):\n"
-        "  * rho_p > 5.0 g/cm3: Dense rocky planet\n"
-        "  * 1.5 <= rho_p <= 5.0 g/cm3: Moderate density sub-Neptune\n"
-        "  * 0.5 <= rho_p < 1.5 g/cm3: Gaseous planet of typical density (Saturn ~0.69, Jupiter ~1.33, Neptune ~1.64 g/cm3). For a sub-Saturn sized object (6-10 R_earth) with density ~0.69-1.3 g/cm3, explicitly say 'low-density gaseous planet in the sub-Saturn regime'.\n"
-        "  * rho_p < 0.5 g/cm3: Highly inflated gaseous planet or super-puff world (extremely low density — do NOT call it dense).\n\n"
-        "Vetting Rules:\n"
-        "- A periodic transit (depth) corresponding to a radius ratio of a planet is characteristic of a transiting exoplanet.\n"
-        "- A V-shaped profile (is_v_shape = True) strongly suggests an eclipsing binary star system rather than a planet.\n"
-        "- Depth differences between odd and even transits (odd_depth vs even_depth) point to a binary star system.\n"
-        "- A significant secondary eclipse (secondary_depth > 30% of primary depth) indicates a binary system.\n"
-        "- Signal-to-Noise Ratio (snr) must be high enough (typically snr >= 10 is secure; snr < 3 is noise).\n"
-        "- Short periods (period < 1.5 days) have high binary probability but can be Hot Jupiters.\n\n"
-        "Scientific Phrasing Guidelines:\n"
-        "- Use the following scientific phrasing: 'is consistent with a planetary interpretation and shows no strong evidence for an eclipsing binary scenario' instead of 'likely a single planet candidate rather than an eclipsing binary system'.\n"
-        "- Do NOT mention 'a single planet crossing' or claim there is only one planet. Instead, use: 'The U-shaped transit profile is consistent with a planet transiting the host star.' or 'The U-shaped transit profile is characteristic of a planetary transit event.'\n"
-        "- When discussing shape profiles, use 'U-shaped transit profile' instead of 'U-shape profile' or 'U-shaped profile'.\n"
-        "- When discussing evidence, use the phrase 'support a planetary interpretation' instead of 'support a planetary origin' to align with photometric conventions.\n"
-        "- Do not report negative or zero values for the secondary eclipse depth (e.g. do not write 'secondary eclipse depth of -0.000000'). Instead, write 'No significant secondary eclipse was detected' or 'Secondary eclipse depth is consistent with zero'.\n"
-        "- Refer to the photometric validation score as 'photometric consistency score' or 'vetting score' instead of 'local heuristic score'.\n"
-        "- When explaining the confidence of a planet candidate, explicitly support it by highlighting the lack of odd-even variations, the absence of a secondary eclipse, and the physically plausible radius and density.\n\n"
-        "Confidence Score Vetting Scale (CRITICAL CAPPING LIMITS):\n"
-        "- Use the following confidence range mapping:\n"
-        "  * 70.0% to 80.0%  : Planet Candidate\n"
-        "  * 80.0% to 90.0%  : Strong Planet Candidate\n"
-        "  * 90.0% to 95.0%  : High-Confidence Planet Candidate (ONLY if ALL four checks pass: RUWE < 1.2, neighbor count = 0, dilution factor < 0.02, AND stellar density consistency score > 0)\n"
-        "  * NEVER output a score above 95.0% under any circumstances.\n"
-        "  * If any of the four Gaia/density checks fail, cap confidence at 90.0%.\n\n"
-        "Format the output strictly as a JSON object with these exact keys:\n"
+
+        # ── Radius taxonomy ──────────────────────────────────────────────
+        "Radius Classification Taxonomy (use ONLY these boundaries):\n"
+        "  R_p < 1.5 R_earth        : Rocky planet (Earth-sized or smaller)\n"
+        "  1.5 <= R_p < 4.0 R_earth : Super-Earth\n"
+        "  4.0 <= R_p < 6.0 R_earth : Mini-Neptune / Sub-Neptune\n"
+        "  6.0 <= R_p < 10.0 R_earth: Sub-Saturn  [acceptable variants: 'inflated sub-Saturn', 'sub-Jovian']\n"
+        "  10.0 <= R_p < 15.0 R_earth: Jupiter-sized gas giant  (Jupiter = 11.2 R_earth)\n"
+        "  R_p >= 15.0 R_earth      : Stellar companion / brown dwarf candidate\n"
+        "CRITICAL RULE: NEVER call an object 'Jupiter-sized' if R_p < 10.0 R_earth. "
+        "A planet of 6-10 R_earth is Sub-Saturn, not Jupiter-sized.\n\n"
+
+        # ── Density taxonomy ─────────────────────────────────────────────
+        "Density Classification (reference: Earth=5.51, Neptune=1.64, Jupiter=1.33, Saturn=0.69 g/cm3):\n"
+        "  rho_p > 5.0 g/cm3        : Dense rocky planet\n"
+        "  1.5 to 5.0 g/cm3         : Moderate-density sub-Neptune\n"
+        "  0.5 to 1.5 g/cm3         : Typical gaseous planet density. For a sub-Saturn (6-10 R_earth) "
+        "in this range, describe as 'low-density gaseous planet in the sub-Saturn regime'.\n"
+        "  < 0.5 g/cm3              : Highly inflated / super-puff world. NEVER describe as dense.\n\n"
+
+        # ── Equilibrium temperature ───────────────────────────────────────
+        "Equilibrium Temperature Interpretation (MANDATORY — follow exactly):\n"
+        "  T_eq < 200 K   : Extremely cold — frozen world, far from host star.\n"
+        "  200-320 K      : Temperate — potentially within habitable zone. "
+        "Only in this range may you mention potential for liquid water or habitability.\n"
+        "  320-500 K      : Warm — too hot for liquid water. Describe as 'warm atmosphere' or 'warm irradiated planet'.\n"
+        "  500-1000 K     : Hot — firmly outside any habitable zone. "
+        "Describe as 'highly irradiated hot planet' or 'hot atmosphere'.\n"
+        "  1000-2000 K    : Very hot — in the realm of molten rock, vaporized metals, and extreme stellar irradiation. "
+        "Describe as 'extremely hot, consistent with a hot sub-Saturn or hot Jupiter class' or similar. "
+        "NEVER mention habitability, liquid water, or surface life at these temperatures.\n"
+        "  > 2000 K       : Extreme — approaching stellar temperatures. Likely tidally locked with dayside ablation.\n"
+        "ABSOLUTE RULE: NEVER suggest liquid water, habitable conditions, or biosignature potential "
+        "for any planet with T_eq > 320 K. A planet at 1369 K cannot support liquid water — "
+        "water boils at 373 K at Earth pressure and vaporizes completely at these temperatures.\n\n"
+
+        # ── Insolation flux ───────────────────────────────────────────────
+        "Insolation Flux Interpretation (Earth = 1.0 by definition):\n"
+        "  < 0.3          : Sub-stellar — cold, outer system\n"
+        "  0.3 to 1.5     : Near habitable zone (only mention habitability here)\n"
+        "  1.5 to 10      : Warm, moderately irradiated\n"
+        "  10 to 100      : Hot — well inside the inner boundary of any habitable zone\n"
+        "  > 100          : Extreme irradiation — hot Jupiter / hot sub-Saturn regime. "
+        "NEVER associate this with habitability.\n\n"
+
+        # ── Vetting rules ─────────────────────────────────────────────────
+        "Photometric Vetting Rules:\n"
+        "- U-shaped transit profile (is_v_shape = False) is consistent with a planetary transit.\n"
+        "- V-shaped profile (is_v_shape = True) strongly suggests an eclipsing binary.\n"
+        "- Odd/even transit depth difference > 0.002 points to a binary system.\n"
+        "- Secondary eclipse depth > 30% of primary depth indicates a binary.\n"
+        "- SNR >= 10 is secure detection; SNR < 3 is noise.\n"
+        "- Short periods (< 1.5 days) have elevated binary probability but can be Hot Jupiters.\n\n"
+
+        # ── Phrasing standards ────────────────────────────────────────────
+        "Scientific Phrasing Standards (follow exactly):\n"
+        "- Shape: write 'U-shaped transit profile', not 'U-shape profile'.\n"
+        "- Binary exclusion: write 'shows no strong evidence for an eclipsing binary scenario'.\n"
+        "- Planetary claim: write 'consistent with a planetary interpretation', not 'planetary origin'.\n"
+        "- Do NOT say 'a single planet crossing'. Say: 'The U-shaped transit profile is consistent with "
+        "a planet transiting the host star.'\n"
+        "- Secondary eclipse: never write negative or zero numeric values. Write 'No significant "
+        "secondary eclipse was detected.' if |secondary_depth| < 0.000001.\n"
+        "- Score label: use 'photometric consistency score', not 'local heuristic score'.\n"
+        "- Mention: lack of odd-even variation, absence of secondary eclipse, and physically plausible "
+        "radius and density when explaining confidence.\n"
+        "- When mentioning Gaia RUWE, note that RUWE < 1.2 indicates a well-behaved single star.\n"
+        "- Do NOT invent values not present in the metrics (e.g., albedo is not provided).\n\n"
+
+        # ── Confidence cap ────────────────────────────────────────────────
+        "Confidence Score Rules (CRITICAL):\n"
+        "  70-80%  : Planet Candidate\n"
+        "  80-90%  : Strong Planet Candidate\n"
+        "  90-95%  : High-Confidence Planet Candidate — ONLY if ALL four pass: "
+        "RUWE < 1.2, neighbor_count = 0, dilution_factor < 0.02, density_bonus > 0.\n"
+        "  NEVER output confidence > 95.0% under any circumstances.\n"
+        "  If any of the four Gaia/density checks fail, cap at 90.0%.\n\n"
+
+        # ── Output format ─────────────────────────────────────────────────
+        "Output STRICTLY as a JSON object with exactly these three keys:\n"
         "{\n"
-        "  \"verdict\": \"<A concise label, e.g. High-Confidence Planet Candidate, Planet Candidate, Likely False Positive, etc. Do NOT include any emojis.>\",\n"
-        "  \"confidence\": <float percentage 0.0 to 95.0>,\n"
-        "  \"interpretation\": \"<A detailed, scientifically accurate explanation of the metrics. Mention the shape profile, density, estimated temperature, and albedo. Mention Gaia contamination checks and stellar density consistency where relevant. Use the sizing and density taxonomy terms correctly. Do NOT include emojis.>\"\n"
+        "  \"verdict\": \"<concise label: High-Confidence Planet Candidate | Strong Planet Candidate | "
+        "Planet Candidate | Marginal Planet Candidate | Likely False Positive | No Significant Transit Detected. "
+        "No emojis.>\",\n"
+        "  \"confidence\": <float 0.0-95.0>,\n"
+        "  \"interpretation\": \"<3-5 sentences. Cover: (1) transit shape and what it implies, "
+        "(2) planet size class and density regime using the taxonomy above, "
+        "(3) equilibrium temperature description using the mandatory temperature table above — "
+        "NEVER mention habitability if T_eq > 320 K, "
+        "(4) Gaia RUWE and contamination result if available, "
+        "(5) overall vetting conclusion. No emojis. No albedo speculation.>\"\n"
         "}\n"
-        "Do not include any formatting or explanation outside the JSON block. Output ONLY the JSON."
+        "Do not include any text, markdown, or explanation outside the JSON block. Output ONLY the JSON."
     )
 
     user_content = f"""
@@ -102,7 +153,6 @@ Stellar Transit Parameters for analysis (TIC ID: {metrics.get('tic_id', 'Unknown
 - Period: {metrics.get('period', 0.0):.4f} days
 - Transit Depth: {metrics.get('depth', 0.0):.6f} (Normalized flux drop)
 - Transit Duration: {metrics.get('duration_hours', 0.0):.2f} hours
-- Ingress/Duration Ratio: {metrics.get('ingress_ratio', 0.0):.3f}
 - Signal-to-Noise Ratio (SNR): {metrics.get('snr', 0.0):.2f}
 - Odd Transit Depth: {metrics.get('odd_depth', 0.0):.6f}
 - Even Transit Depth: {metrics.get('even_depth', 0.0):.6f}
@@ -142,7 +192,7 @@ Multi-Sector Stability:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ],
-        "temperature": 0.1,
+        "temperature": 0.05,
         "max_tokens": 512
     }
 
