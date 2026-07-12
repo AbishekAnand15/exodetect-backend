@@ -73,9 +73,11 @@ def generate_ai_interpretation(metrics: dict) -> dict:
         "- Signal-to-Noise Ratio (snr) must be high enough (typically snr >= 10 is secure; snr < 3 is noise).\n"
         "- Short periods (period < 1.5 days) have high binary probability but can be Hot Jupiters.\n\n"
         "Scientific Phrasing Guidelines:\n"
-        "- Use the following scientific phrasing: 'consistent with a planetary origin and shows no strong evidence for an eclipsing binary scenario' instead of 'likely a single planet candidate rather than an eclipsing binary system'.\n"
+        "- Use the following scientific phrasing: 'is consistent with a planetary interpretation and shows no strong evidence for an eclipsing binary scenario' instead of 'likely a single planet candidate rather than an eclipsing binary system'.\n"
         "- When discussing shape profiles, use 'U-shaped transit profile' instead of 'U-shape profile' or 'U-shaped profile'.\n"
         "- When discussing evidence, use the phrase 'support a planetary interpretation' instead of 'support a planetary origin' to align with photometric conventions.\n"
+        "- Do not report negative or zero values for the secondary eclipse depth (e.g. do not write 'secondary eclipse depth of -0.000000'). Instead, write 'No significant secondary eclipse was detected' or 'Secondary eclipse depth is consistent with zero'.\n"
+        "- Refer to the photometric validation score as 'photometric consistency score' or 'vetting score' instead of 'local heuristic score'.\n"
         "- When explaining the confidence of a planet candidate, explicitly support it by highlighting the lack of odd-even variations, the absence of a secondary eclipse, and the physically plausible radius and density.\n\n"
         "Format the output strictly as a JSON object with these exact keys:\n"
         "{\n"
@@ -108,8 +110,8 @@ Stellar Transit Parameters for analysis (TIC ID: {metrics.get('tic_id', 'Unknown
 - Insolation Flux: {metrics.get('insolation_flux', 0.0):.2f} Earth Units
 - Profile Shape: {"V-Shape" if metrics.get('is_v_shape') else "U-Shape"} (Shape Fit Ratio: {metrics.get('fit_ratio', 0.0):.2f})
 - Stellar Baseline Noise (Scatter): {metrics.get('stellar_scatter', 0.0):.6f}
-- Local Heuristic Score: {metrics.get('local_confidence', 0.0)}%
-- Local Heuristic Verdict: "{metrics.get('local_verdict', '')}"
+- Photometric Consistency Score: {metrics.get('local_confidence', 0.0)}%
+- Photometric Vetting Verdict: "{metrics.get('local_verdict', '')}"
 """
 
     payload = {
